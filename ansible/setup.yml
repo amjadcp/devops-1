@@ -1,13 +1,70 @@
 - hosts: hetzner
+  become: true
   tasks:
     - name: Install Docker
       apt:
         name: docker.io
         state: present
+        update_cache: yes
+
     - name: Install k3s
       shell: curl -sfL https://get.k3s.io | sh -
-    - name: Copy kubeconfig
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Copy kubeconfig from remote to local
       fetch:
         src: /etc/rancher/k3s/k3s.yaml
         dest: ~/.kube/config
         flat: yes
+
+    - name: Install Kubernetes Dashboard
+      shell: kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Create admin user for dashboard
+      copy:
+        dest: /tmp/dashboard-admin-user.yaml
+        content: |
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: admin-user
+            namespace: kubernetes-dashboard
+          ---
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: admin-user
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: cluster-admin
+          subjects:
+          - kind: ServiceAccount
+            name: admin-user
+            namespace: kubernetes-dashboard
+
+    - name: Apply admin user
+      shell: kubectl apply -f /tmp/dashboard-admin-user.yaml
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Get dashboard token
+      shell: >
+        kubectl -n kubernetes-dashboard create token admin-user
+      register: dashboard_token
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Show dashboard token
+      debug:
+        msg: "Access Token for Kubernetes Dashboard: {{ dashboard_token.stdout }}"
+
+    - name: Expose Dashboard via NodePort
+      shell: |
+        kubectl patch svc kubernetes-dashboard -n kubernetes-dashboard \
+          -p '{"spec": {"type": "NodePort"}}'
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
