@@ -1,0 +1,13 @@
+- hosts: hetzner
+  tasks:
+    - name: Install Docker
+      apt:
+        name: docker.io
+        state: present
+    - name: Install k3s
+      shell: curl -sfL https://get.k3s.io | sh -
+    - name: Copy kubeconfig
+      fetch:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: ~/.kube/config
+        flat: yes
